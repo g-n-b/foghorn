@@ -2,11 +2,11 @@ mod disk_writer;
 
 extern crate rocket;
 
-use std::sync::Mutex;
-use rocket::{get, launch, post, routes, State};
+use crate::disk_writer::DiskWriter;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
-use crate::disk_writer::DiskWriter;
+use rocket::{get, launch, post, routes, State};
+use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(crate = "rocket::serde")]
@@ -21,21 +21,25 @@ fn index() -> Json<String> {
 }
 
 // Route to receive events and write them to disk
-// Route to receive events and write them to disk
+/// # Arguments
+///
+/// * `event` - the Json payload of an @Event type
+/// * `disk_writer` - The disk writer singleton
+///
 #[post("/event", data = "<event>")]
-fn receive_event(event: Json<Event>, disk_writer: &State<Mutex<DiskWriter>>) -> &'static str {
+fn receive_event(event: Json<Event>, disk_writer: &State<Mutex<DiskWriter>>) -> Result<String, String> {
     let writer = disk_writer.inner().lock().unwrap(); // Acquire a mutable guard
     if let Err(e) = writer.write_item(&event.into_inner()) {
         eprintln!("Failed to write event to disk: {}", e);
-        return "Error writing event to disk";
+        // TODO how does Err work?
+        return Err(String::from("Error"));
     }
     if let Err(e) = writer.flush() {
         eprintln!("Failed to flush data to disk: {}", e);
-        return "Error flushing data to disk";
+        return Err("Internal Error".to_string());
     }
-    "Event received and written to disk!"
+    Ok("Event received and written to disk!".to_string())
 }
-
 
 #[launch]
 fn rocket() -> _ {
@@ -44,9 +48,8 @@ fn rocket() -> _ {
 
     // Wrap DiskWriter in a Mutex and pass it as managed state
     rocket::build()
-
+        // Store the diskwriter as a singleton to be managed by rocket
         .manage(Mutex::new(disk_writer))
-            .mount("/", routes![index])
+        .mount("/", routes![index])
         .mount("/", routes![receive_event])
 }
-
